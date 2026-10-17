@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RAGE E2EE Messenger</title>
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+    <style>
+        :root {
+            --bg: #121212;
+            --card: #1e1e1e;
+            --border: #333;
+            --text: #fff;
+            --accent: #E5A93D;
+            --danger: #d32f2f;
+            --success: #2ecc71;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, sans-serif; }
+
+        body { background-color: var(--bg); color: var(--text); height: 100vh; overflow: hidden; display: flex; justify-content: center; align-items: center; }
+
+        /* Авторизация */
+        #auth-screen {
+            background: var(--card); padding: 30px; border-radius: 15px; width: 320px; border: 1px solid var(--border);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+        }
+        #auth-screen h2 { color: var(--accent); text-align: center; margin-bottom: 20px; text-transform: uppercase; }
+        input[type="text"], input[type="password"] {
+            width: 100%; padding: 12px; margin-bottom: 15px; background: #000; border: 1px solid var(--border);
+            color: #fff; border-radius: 8px; outline: none;
+        }
+        button {
+            width: 100%; padding: 12px; background: var(--accent); color: #000; border: none; border-radius: 8px;
+            font-weight: bold; cursor: pointer; text-transform: uppercase; transition: 0.2s; margin-bottom: 10px;
+        }
+        button:hover { background: #FFC55C; }
+        button.secondary { background: #333; color: #fff; }
+        button.secondary:hover { background: #444; }
+
+        /* Основное приложение */
+        #app-screen { display: none; width: 100%; height: 100%; max-width: 900px; background: var(--card); flex-direction: row; border: 1px solid var(--border); }
+
+        .sidebar { width: 300px; border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+        .profile-bar { padding: 15px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }
+        .avatar { width: 40px; height: 40px; border-radius: 50%; background: #333; object-fit: cover; }
+        .avatar img { width: 100%; height: 100%; border-radius: 50%; }
+        .user-info { flex: 1; font-size: 14px; font-weight: bold; color: var(--accent); cursor: pointer; }
+        .search-box { padding: 10px; border-bottom: 1px solid var(--border); }
+        .contact-list { flex: 1; overflow-y: auto; }
+        .contact-item { padding: 15px; border-bottom: 1px solid var(--border); cursor: pointer; display: flex; gap: 10px; align-items: center; }
+        .contact-item:hover { background: rgba(255,255,255,0.05); }
+        .contact-item.active { background: rgba(229, 169, 61, 0.2); border-left: 3px solid var(--accent); }
+
+        .chat-area { flex: 1; display: flex; flex-direction: column; }
+        .chat-header { padding: 15px; border-bottom: 1px solid var(--border); font-weight: bold; display: flex; justify-content: space-between; align-items: center; }
+        .messages { flex: 1; padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; background: #0a0a0a; }
+        .msg { max-width: 70%; padding: 10px 15px; border-radius: 10px; font-size: 14px; word-wrap: break-word; }
+        .msg.me { align-self: flex-end; background: var(--accent); color: #000; border-bottom-right-radius: 2px; }
+        .msg.them { align-self: flex-start; background: #333; color: #fff; border-bottom-left-radius: 2px; }
+        .msg img, .msg video { max-width: 100%; border-radius: 5px; margin-top: 5px; }
+        .msg-file { display: block; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 5px; color: inherit; text-decoration: none; margin-top: 5px; }
+        
+        .input-area { padding: 15px; border-top: 1px solid var(--border); display: flex; gap: 10px; }
+        .input-area input[type="text"] { margin: 0; flex: 1; }
+        .input-area button { width: auto; padding: 0 20px; margin: 0; }
+        .file-btn { background: #333; color: #fff; width: 45px; display: flex; justify-content: center; align-items: center; font-size: 20px; cursor: pointer; border-radius: 8px; }
+        .file-btn:hover { background: #444; }
+        input[type="file"] { display: none; }
+
+        /* Модалки */
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); justify-content: center; align-items: center; z-index: 100; }
+        .modal-content { background: var(--card); padding: 20px; border-radius: 15px; border: 1px solid var(--border); width: 320px; text-align: center; }
+        .modal-content h3 { color: var(--accent); margin-bottom: 15px; }
+        #qr-reader { width: 100%; height: 250px; background: #000; position: relative; margin-bottom: 10px; }
+        #qr-reader video { width: 100%; height: 100%; object-fit: cover; }
+        .qr-container { background: #fff; padding: 10px; display: inline-block; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+
+    <!-- ЭКРАН АВТОРИЗАЦИИ -->
+    <div id="auth-screen">
+        <h2>RAGE E2EE</h2>
+        <input type="text" id="auth-user" placeholder="Юзернейм (латиницей)">
+        <input type="password" id="auth-pass" placeholder="Пароль">
+        <button onclick="registerUser()">Зарегистрироваться</button>
+        <button class="secondary" onclick="loginUser()">Войти</button>
+        <div id="auth-msg" style="color:var(--danger); font-size:12px; text-align:center; margin-top:10px;"></div>
+    </div>
+
+    <!-- ОСНОВНОЕ ПРИЛОЖЕНИЕ -->
+    <div id="app-screen">
+        <!-- Сайдбар -->
+        <div class="sidebar">
+            <div class="profile-bar">
+                <div class="avatar" onclick="openSettings()"><img id="my-avatar" src="" style="display:none;"></div>
+                <div class="user-info" id="my-username">User</div>
+                <button class="secondary" style="width:auto; padding:5px 10px; font-size:10px;" onclick="logout()">Выход</button>
+            </div>
+            <div class="search-box">
+                <input type="text" id="search-input" placeholder="Поиск по юзернейму..." onkeyup="searchContact(this.value)">
+                <div style="display:flex; gap:5px; margin-top:5px;">
+                    <button class="secondary" style="margin:0; font-size:10px;" onclick="openMyQR()">Мой QR</button>
+                    <button class="secondary" style="margin:0; font-size:10px;" onclick="openScanner()">Сканер</button>
+                </div>
+            </div>
+            <div class="contact-list" id="contact-list"></div>
+        </div>
+
+        <!-- Чат -->
+        <div class="chat-area">
+            <div class="chat-header" id="chat-header">Выберите контакт</div>
+            <div class="messages" id="messages"></div>
+            <div class="input-area">
+                <label class="file-btn" for="file-input">+</label>
+                <input type="file" id="file-input" onchange="handleFileUpload(this)">
+                <input type="text" id="msg-input" placeholder="Сообщение..." onkeypress="if(event.key==='Enter') sendMessage()">
+                <button onclick="sendMessage()">></button>
+            </div>
+        </div>
+    </div>
+
+    <!-- МОДАЛКА НАСТРОЕК -->
+    <div class="modal" id="settings-modal">
+        <div class="modal-content">
+            <h3>Настройки профиля</h3>
+            <img id="settings-avatar" src="" style="width:80px; height:80px; border-radius:50%; object-fit:cover; margin-bottom:10px; background:#333;">
+            <input type="file" id="avatar-input" accept="image/*" onchange="changeAvatar(this)">
+            <button class="secondary" onclick="document.getElementById('avatar-input').click()">Сменить аватар</button>
+            <button onclick="document.getElementById('settings-modal').style.display='none'">Закрыть</button>
+        </div>
+    </div>
+
+    <!-- МОДАЛКА QR -->
+    <div class="modal" id="qr-modal">
+        <div class="modal-content">
+            <h3>Мой QR-код</h3>
+            <div class="qr-container" id="my-qr"></div>
+            <button class="secondary" onclick="document.getElementById('qr-modal').style.display='none'">Закрыть</button>
+        </div>
+    </div>
+
+    <!-- МОДАЛКА СКАНЕРА -->
+    <div class="modal" id="scanner-modal">
+        <div class="modal-content">
+            <h3>Сканер QR</h3>
+            <div id="qr-reader"></div>
+            <button class="secondary" onclick="closeScanner()">Отмена</button>
+        </div>
+    </div>
+
+    <script>
+        // === БАЗА ДАННЫХ (LocalStorage) ===
+        const DB = {
+            getUsers: () => JSON.parse(localStorage.getItem('e2ee_users') || '{}'),
+            saveUsers: (u) => localStorage.setItem('e2ee_users', JSON.stringify(u)),
+            getMessages: () => JSON.parse(localStorage.getItem('e2ee_messages') || '[]'),
+            saveMessages: (m) => localStorage.setItem('e2ee_messages', JSON.stringify(m)),
+            getCurrent: () => localStorage.getItem('e2ee_current'),
+            setCurrent: (u) => localStorage.setItem('e2ee_current', u)
+        };
+
+        let myUsername = null;
+        let myPrivateKey = null;
+        let myPublicKeyB64 = null;
+        let currentChatUser = null;
+        let sharedKeys = {}; // Кэш ключей для чатов
+
+        // === УТИЛИТЫ КРИПТОГРАФИИ ===
+        async function derivePasswordHash(password) {
+            const enc = new TextEncoder().encode(password);
+            const hash = await crypto.subtle.digest('SHA-256', enc);
+            return btoa(String.fromCharCode(...new Uint8Array(hash)));
+        }
+
+        async function generateKeys() {
+            const pair = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveKey"]);
+            const pubJwk = await crypto.subtle.exportKey("jwk", pair.publicKey);
+            return { pair, pubB64: btoa(JSON.stringify(pubJwk)) };
+        }
+
+        async function importPublicKey(b64) {
+            const jwk = JSON.parse(atob(b64));
+            return crypto.subtle.importKey("jwk", jwk, { name: "ECDH", namedCurve: "P-256" }, true, []);
+        }
+
+        async function getSharedKey(otherPubB64) {
+            if (sharedKeys[otherPubB64]) return sharedKeys[otherPubB64];
+            const theirPub = await importPublicKey(otherPubB64);
+            const key = await crypto.subtle.deriveKey(
+                { name: "ECDH", public: theirPub },
+                myPrivateKey,
+                { name: "AES-GCM", length: 256 },
+                false,
+                ["encrypt", "decrypt"]
+            );
+            sharedKeys[otherPubB64] = key;
+            return key;
+        }
+
+        async function encryptData(data, key) {
+            const iv = crypto.getRandomValues(new Uint8Array(12));
+            let encoded;
+            if (typeof data === 'string') {
+                encoded = new TextEncoder().encode(data);
+            } else {
+                encoded = new Uint8Array(data);
+            }
+            const cipher = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, encoded);
+            return {
+                iv: btoa(String.fromCharCode(...iv)),
+                data: btoa(String.fromCharCode(...new Uint8Array(cipher)))
+            };
+        }
+
+        async function decryptData(enc, key, isBinary = false) {
+            const iv = Uint8Array.from(atob(enc.iv), c => c.charCodeAt(0));
+            const data = Uint8Array.from(atob(enc.data), c => c.charCodeAt(0));
+            const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, data);
+            if (isBinary) return plain;
+            return new TextDecoder().decode(plain);
+        }
+
+        // === АУТЕНТИФИКАЦИЯ ===
+        async function registerUser() {
+            const user = document.getElementById('auth-user').value.trim().toLowerCase();
+            const pass = document.getElementById('auth-pass').value;
+            const msg = document.getElementById('auth-msg');
+
+            if (!user || !pass) { msg.innerText = "Заполни всё, дебил"; return; }
+            if (DB.getUsers()[user]) { msg.innerText = "Юзернейм занят"; return; }
+
+            const passHash = await derivePasswordHash(pass);
+            const keys = await generateKeys();
+            
+            const users = DB.getUsers();
+            users[user] = {
+                passHash,
+                pubKey: keys.pubB64,
+                privKeyJwk: JSON.stringify(await crypto.subtle.exportKey("jwk", keys.pair.privateKey)),
+                avatar: null
+            };
+            DB.saveUsers(users);
+            
+            msg.style.color = "var(--success)";
+            msg.innerText = "Готово! Теперь войди.";
+            document.getElementById('auth-user').value = '';
+            document.getElementById('auth-pass').value = '';
+        }
+
+        async function loginUser() {
+            const user = document.getElementById('auth-user').value.trim().toLowerCase();
+            const pass = document.getElementById('auth-pass').value;
+            const msg = document.getElementById('auth-msg');
+
+            const users = DB.getUsers();
+            if (!users[user]) { msg.innerText = "Нет такого"; return; }
+
+            const passHash = await derivePasswordHash(pass);
+            if (users[user].passHash !== passHash) { msg.innerText = "Неверный пароль"; return; }
+
+            myUsername = user;
+            DB.setCurrent(user);
+            
+            const privJwk = JSON.parse(users[user].privKeyJwk);
+            myPrivateKey = await crypto.subtle.importKey("jwk", privJwk, { name: "ECDH", namedCurve: "P-256" }, true, ["deriveKey"]);
+            myPublicKeyB64 = users[user].pubKey;
+
+            initApp();
+        }
+
+        function logout() {
+            DB.setCurrent('');
+            location.reload();
+        }
+
+        // === ИНИЦИАЛИЗАЦИЯ ПРИЛОЖЕНИЯ ===
+        function initApp() {
+            document.getElementById('auth-screen').style.display = 'none';
+            document.getElementById('app-screen').style.display = 'flex';
+            document.getElementById('my-username').innerText = myUsername;
+            
+            const users = DB.getUsers();
+            if (users[myUsername].avatar) {
+                document.getElementById('my-avatar').src = users[myUsername].avatar;
+                document.getElementById('my-avatar').style.display = 'block';
+            }
+
+            renderContacts();
+        }
+
+        function renderContacts(filter = '') {
+            const list = document.getElementById('contact-list');
+            list.innerHTML = '';
+            const users = DB.getUsers();
+            
+            for (let u in users) {
+                if (u === myUsername) continue;
+                if (filter && !u.includes(filter.toLowerCase())) continue;
+
+                const div = document.createElement('div');
+                div.className = 'contact-item' + (currentChatUser === u ? ' active' : '');
+                div.onclick = () => openChat(u);
+                
+                const avatarHtml = users[u].avatar ? `<img src="${users[u].avatar}">` : '';
+                div.innerHTML = `<div class="avatar">${avatarHtml}</div><div>@${u}</div>`;
+                list.appendChild(div);
+            }
+        }
+
+        function searchContact(val) {
+            renderContacts(val);
+        }
+
+        // === ЧАТ ===
+        async function openChat(username) {
+            currentChatUser = username;
+            renderContacts(document.getElementById('search-input').value);
+            document.getElementById('chat-header').innerText = `@${username} (E2EE)`;
+            document.getElementById('messages').innerHTML = '';
+            await loadMessages();
+        }
+
+        async function loadMessages() {
+            if (!currentChatUser) return;
+            const allMsgs = DB.getMessages();
+            const users = DB.getUsers();
+            const theirPub = users[currentChatUser].pubKey;
+            const sharedKey = await getSharedKey(theirPub);
+            
+            const container = document.getElementById('messages');
+            container.innerHTML = '';
+
+            for (let m of allMsgs) {
+                if ((m.from === myUsername && m.to === currentChatUser) || 
+                    (m.from === currentChatUser && m.to === myUsername)) {
+                    
+                    const isMe = m.from === myUsername;
+                    const div = document.createElement('div');
+                    div.className = `msg ${isMe ? 'me' : 'them'}`;
+                    
+                    try {
+                        if (m.type === 'text') {
+                            div.innerText = await decryptData(m.payload, sharedKey);
+                        } else if (m.type === 'image' || m.type === 'video' || m.type === 'file') {
+                            const bin = await decryptData(m.payload, sharedKey, true);
+                            const blob = new Blob([bin], { type: m.mime });
+                            const url = URL.createObjectURL(blob);
+                            
+                            if (m.type === 'image') {
+                                const img = document.createElement('img');
+                                img.src = url;
+                                div.appendChild(img);
+                            } else if (m.type === 'video') {
+                                const vid = document.createElement('video');
+                                vid.src = url;
+                                vid.controls = true;
+                                div.appendChild(vid);
+                            } else {
+                                const a = document.createElement('a');
+                                a.href = url;
+                                a.download = m.filename || 'file';
+                                a.className = 'msg-file';
+                                a.innerText = `📎 ${m.filename || 'Скачать файл'}`;
+                                div.appendChild(a);
+                            }
+                        }
+                    } catch (e) {
+                        div.innerText = "[Ошибка расшифровки]";
+                    }
+                    container.appendChild(div);
+                }
+            }
+            container.scrollTop = container.scrollHeight;
+        }
+
+        async function sendMessage() {
+            if (!currentChatUser) return;
+            const input = document.getElementById('msg-input');
+            const text = input.value.trim();
+            if (!text) return;
+
+            const users = DB.getUsers();
+            const theirPub = users[currentChatUser].pubKey;
+            const sharedKey = await getSharedKey(theirPub);
+            
+            const enc = await encryptData(text, sharedKey);
+            
+            const msgs = DB.getMessages();
+            msgs.push({
+                from: myUsername,
+                to: currentChatUser,
+                type: 'text',
+                payload: enc,
+                timestamp: Date.now()
+            });
+            DB.saveMessages(msgs);
+            
+            input.value = '';
+            await loadMessages();
+        }
+
+        async function handleFileUpload(input) {
+            if (!currentChatUser || !input.files[0]) return;
+            const file = input.files[0];
+            const arrayBuffer = await file.arrayBuffer();
+            
+            const users = DB.getUsers();
+            const theirPub = users[currentChatUser].pubKey;
+            const sharedKey = await getSharedKey(theirPub);
+            
+            const enc = await encryptData(arrayBuffer, sharedKey);
+            
+            let type = 'file';
+            if (file.type.startsWith('image/')) type = 'image';
+            if (file.type.startsWith('video/')) type = 'video';
+
+            const msgs = DB.getMessages();
+            msgs.push({
+                from: myUsername,
+                to: currentChatUser,
+                type: type,
+                mime: file.type,
+                filename: file.name,
+                payload: enc,
+                timestamp: Date.now()
+            });
+            DB.saveMessages(msgs);
+            
+            input.value = '';
+            await loadMessages();
+        }
+
+        // === QR КОДЫ ===
+        function openMyQR() {
+            const modal = document.getElementById('qr-modal');
+            const container = document.getElementById('my-qr');
+            container.innerHTML = '';
+            modal.style.display = 'flex';
+            
+            const payload = JSON.stringify({ u: myUsername, k: myPublicKeyB64 });
+            new QRCode(container, {
+                text: payload,
+                width: 200,
+                height: 200,
+                colorDark : "#000000",
+                colorLight : "#ffffff"
+            });
+        }
+
+        let videoStream = null;
+        let scanInterval = null;
+
+        function openScanner() {
+            const modal = document.getElementById('scanner-modal');
+            const reader = document.getElementById('qr-reader');
+            modal.style.display = 'flex';
+            reader.innerHTML = '';
+
+            navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+                .then(stream => {
+                    videoStream = stream;
+                    const video = document.createElement('video');
+                    video.srcObject = stream;
+                    video.setAttribute('playsinline', true);
+                    video.play();
+                    reader.appendChild(video);
+
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+                    scanInterval = setInterval(() => {
+                        if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                            canvas.width = video.videoWidth;
+                            canvas.height = video.videoHeight;
+                            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                            const code = jsQR(imageData.data, canvas.width, canvas.height);
+                            
+                            if (code) {
+                                try {
+                                    const data = JSON.parse(code.data);
+                                    if (data.u && data.k) {
+                                        addContactFromQR(data.u, data.k);
+                                        closeScanner();
+                                    }
+                                } catch (e) {}
+                            }
+                        }
+                    }, 500);
+                })
+                .catch(err => {
+                    alert("Нет доступа к камере. Нужен HTTPS или localhost.");
+                });
+        }
+
+        function closeScanner() {
+            document.getElementById('scanner-modal').style.display = 'none';
+            if (videoStream) {
+                videoStream.getTracks().forEach(track => track.stop());
+                videoStream = null;
+            }
+            clearInterval(scanInterval);
+        }
+
+        function addContactFromQR(username, pubKey) {
+            // В реальном приложении здесь была бы синхронизация с сервером.
+            // Здесь мы просто добавляем контакт в локальную БД, если его нет.
+            const users = DB.getUsers();
+            if (!users[username]) {
+                // Если юзера нет в нашей локальной БД, создаем заглушку с его ключом
+                // (в реальности сервер бы отдал профиль по ключу)
+                users[username] = {
+                    pubKey: pubKey,
+                    avatar: null,
+                    passHash: "external_contact" // Заглушка
+                };
+                DB.saveUsers(users);
+                alert(`Контакт @${username} добавлен!`);
+            } else {
+                alert(`Контакт @${username} уже есть.`);
+            }
+            renderContacts();
+        }
+
+        // === НАСТРОЙКИ ===
+        function openSettings() {
+            document.getElementById('settings-modal').style.display = 'flex';
+            const users = DB.getUsers();
+            if (users[myUsername].avatar) {
+                document.getElementById('settings-avatar').src = users[myUsername].avatar;
+            }
+        }
+
+        function changeAvatar(input) {
+            if (!input.files[0]) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const b64 = e.target.result;
+                const users = DB.getUsers();
+                users[myUsername].avatar = b64;
+                DB.saveUsers(users);
+                
+                document.getElementById('my-avatar').src = b64;
+                document.getElementById('my-avatar').style.display = 'block';
+                document.getElementById('settings-avatar').src = b64;
+            };
+            reader.readAsDataURL(input.files[0]);
+        }
+
+        // === ЗАПУСК ===
+        window.onload = async () => {
+            const current = DB.getCurrent();
+            if (current) {
+                const users = DB.getUsers();
+                if (users[current]) {
+                    myUsername = current;
+                    const privJwk = JSON.parse(users[current].privKeyJwk);
+                    myPrivateKey = await crypto.subtle.importKey("jwk", privJwk, { name: "ECDH", namedCurve: "P-256" }, true, ["deriveKey"]);
+                    myPublicKeyB64 = users[current].pubKey;
+                    initApp();
+                }
+            }
+        };
+    </script>
+</body>
+</html>
